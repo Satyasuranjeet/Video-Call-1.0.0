@@ -39,7 +39,7 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
   const getWebSocketUrl = () => {
     // Always use the Vercel backend
     const backendUrl = "video-call-1-0-0.vercel.app"
-    const protocol = "wss:" // Vercel always uses HTTPS/WSS
+    const protocol = "https:" // Vercel always uses HTTPS/WSS
 
     return `${protocol}//${backendUrl}/ws/${roomId}?name=${encodeURIComponent(userName)}`
   }
