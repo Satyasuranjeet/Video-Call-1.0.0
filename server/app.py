@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-WebRTC Signaling Server - WORKING VERSION
-This server handles WebSocket connections and WebRTC signaling
+WebRTC Signaling Server - Vercel Compatible
+Optimized for Vercel deployment with proper CORS and WebSocket handling
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -20,12 +20,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="VideoCall Signaling Server", version="1.0.0")
+app = FastAPI(
+    title="VideoCall Signaling Server", 
+    version="1.0.0",
+    description="WebRTC signaling server for video calling"
+)
 
-# Enable CORS for all origins (in production, specify your domain)
+# Enable CORS for all origins (Vercel deployment)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, specify your frontend domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,55 +37,57 @@ app.add_middleware(
 
 class ConnectionManager:
     def __init__(self):
-        # Room ID -> Set of WebSocket connections
         self.active_connections: Dict[str, Set[WebSocket]] = {}
-        # WebSocket -> Room ID
         self.user_rooms: Dict[WebSocket, str] = {}
-        # WebSocket -> User info
         self.user_info: Dict[WebSocket, dict] = {}
-        
-        logger.info("🚀 Connection Manager initialized")
+        logger.info("🚀 Connection Manager initialized for Vercel")
     
     async def connect(self, websocket: WebSocket, room_id: str, user_data: dict):
         """Handle new user connection"""
-        await websocket.accept()
-        logger.info(f"🔌 User '{user_data['name']}' connecting to room '{room_id}'")
-        
-        # Initialize room if it doesn't exist
-        if room_id not in self.active_connections:
-            self.active_connections[room_id] = set()
-            logger.info(f"🏠 Created new room: {room_id}")
-        
-        # Store user information
-        self.user_rooms[websocket] = room_id
-        self.user_info[websocket] = user_data
-        
-        # Get existing participants before adding new user
-        existing_participants = []
-        for conn in self.active_connections[room_id]:
-            if conn in self.user_info:
-                existing_participants.append(self.user_info[conn])
-        
-        # Add user to room
-        self.active_connections[room_id].add(websocket)
-        
-        # Send room_joined message to new user
-        await self.send_to_user(websocket, {
-            "type": "room_joined",
-            "room_id": room_id,
-            "user_id": user_data["id"],
-            "participants": existing_participants
-        })
-        
-        # Notify existing participants about new user
-        if existing_participants:
-            await self.broadcast_to_room(room_id, {
-                "type": "user_joined",
-                "user": user_data,
-                "room_id": room_id
-            }, exclude=websocket)
-        
-        logger.info(f"✅ User '{user_data['name']}' joined room '{room_id}'. Total participants: {len(self.active_connections[room_id])}")
+        try:
+            await websocket.accept()
+            logger.info(f"🔌 User '{user_data['name']}' connecting to room '{room_id}'")
+            
+            # Initialize room if it doesn't exist
+            if room_id not in self.active_connections:
+                self.active_connections[room_id] = set()
+                logger.info(f"🏠 Created new room: {room_id}")
+            
+            # Store user information
+            self.user_rooms[websocket] = room_id
+            self.user_info[websocket] = user_data
+            
+            # Get existing participants before adding new user
+            existing_participants = []
+            for conn in self.active_connections[room_id]:
+                if conn in self.user_info:
+                    existing_participants.append(self.user_info[conn])
+            
+            # Add user to room
+            self.active_connections[room_id].add(websocket)
+            
+            # Send room_joined message to new user
+            await self.send_to_user(websocket, {
+                "type": "room_joined",
+                "room_id": room_id,
+                "user_id": user_data["id"],
+                "participants": existing_participants,
+                "server": "vercel"
+            })
+            
+            # Notify existing participants about new user
+            if existing_participants:
+                await self.broadcast_to_room(room_id, {
+                    "type": "user_joined",
+                    "user": user_data,
+                    "room_id": room_id
+                }, exclude=websocket)
+            
+            logger.info(f"✅ User '{user_data['name']}' joined room '{room_id}'. Total participants: {len(self.active_connections[room_id])}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error connecting user: {e}")
+            raise
     
     def disconnect(self, websocket: WebSocket):
         """Handle user disconnection"""
@@ -94,28 +100,33 @@ class ConnectionManager:
         
         logger.info(f"🔌 User '{user_name}' disconnecting from room '{room_id}'")
         
-        # Remove from room
-        if room_id in self.active_connections:
-            self.active_connections[room_id].discard(websocket)
+        try:
+            # Remove from room
+            if room_id in self.active_connections:
+                self.active_connections[room_id].discard(websocket)
+                
+                # Notify other participants
+                if user_data:
+                    asyncio.create_task(self.broadcast_to_room(room_id, {
+                        "type": "user_left",
+                        "user": user_data
+                    }, exclude=websocket))
+                
+                # Remove empty room
+                if not self.active_connections[room_id]:
+                    del self.active_connections[room_id]
+                    logger.info(f"🗑️ Removed empty room: {room_id}")
             
-            # Notify other participants
-            if user_data:
-                asyncio.create_task(self.broadcast_to_room(room_id, {
-                    "type": "user_left",
-                    "user": user_data
-                }, exclude=websocket))
+            # Clean up user data
+            if websocket in self.user_rooms:
+                del self.user_rooms[websocket]
+            if websocket in self.user_info:
+                del self.user_info[websocket]
             
-            # Remove empty room
-            if not self.active_connections[room_id]:
-                del self.active_connections[room_id]
-                logger.info(f"🗑️ Removed empty room: {room_id}")
-        
-        # Clean up user data
-        del self.user_rooms[websocket]
-        if websocket in self.user_info:
-            del self.user_info[websocket]
-        
-        logger.info(f"👋 User '{user_name}' disconnected from room '{room_id}'")
+            logger.info(f"👋 User '{user_name}' disconnected from room '{room_id}'")
+            
+        except Exception as e:
+            logger.error(f"❌ Error during disconnect: {e}")
     
     async def broadcast_to_room(self, room_id: str, message: dict, exclude: WebSocket = None):
         """Broadcast message to all users in a room"""
@@ -139,6 +150,7 @@ class ConnectionManager:
         # Clean up disconnected connections
         for conn in disconnected:
             self.active_connections[room_id].discard(conn)
+            self.disconnect(conn)
         
         logger.debug(f"📡 Broadcasted {message['type']} to {sent_count} users in room {room_id}")
     
@@ -150,28 +162,6 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"❌ Error sending message to user: {e}")
             self.disconnect(websocket)
-    
-    def get_room_info(self, room_id: str):
-        """Get information about a room"""
-        if room_id not in self.active_connections:
-            return None
-        
-        participants = []
-        for conn in self.active_connections[room_id]:
-            if conn in self.user_info:
-                user = self.user_info[conn]
-                participants.append({
-                    "id": user["id"],
-                    "name": user["name"],
-                    "joined_at": user.get("joined_at")
-                })
-        
-        return {
-            "room_id": room_id,
-            "participant_count": len(self.active_connections[room_id]),
-            "participants": participants,
-            "created_at": datetime.now().isoformat()
-        }
 
 # Global connection manager
 manager = ConnectionManager()
@@ -181,23 +171,27 @@ async def root():
     """Server status endpoint"""
     total_connections = sum(len(conns) for conns in manager.active_connections.values())
     return {
-        "message": "VideoCall Signaling Server is running",
+        "message": "VideoCall Signaling Server is running on Vercel",
         "status": "healthy",
         "version": "1.0.0",
+        "platform": "vercel",
         "active_rooms": len(manager.active_connections),
         "total_connections": total_connections,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "websocket_url": "wss://video-call-1-0-0.vercel.app/ws/{room_id}?name={user_name}"
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint for Vercel"""
     total_connections = sum(len(conns) for conns in manager.active_connections.values())
     return {
         "status": "healthy",
+        "platform": "vercel",
         "active_rooms": len(manager.active_connections),
         "total_connections": total_connections,
-        "uptime": "running"
+        "uptime": "running",
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/rooms")
@@ -205,47 +199,70 @@ async def list_rooms():
     """List all active rooms"""
     rooms = []
     for room_id in manager.active_connections:
-        room_info = manager.get_room_info(room_id)
-        if room_info:
-            rooms.append(room_info)
+        connections = manager.active_connections[room_id]
+        participants = []
+        
+        for conn in connections:
+            if conn in manager.user_info:
+                user = manager.user_info[conn]
+                participants.append({
+                    "id": user["id"], 
+                    "name": user["name"],
+                    "joined_at": user.get("joined_at")
+                })
+        
+        rooms.append({
+            "room_id": room_id,
+            "participant_count": len(connections),
+            "participants": participants,
+            "created_at": datetime.now().isoformat()
+        })
     
     return {
         "rooms": rooms,
-        "total_rooms": len(rooms)
+        "total_rooms": len(rooms),
+        "platform": "vercel"
     }
 
 @app.get("/rooms/{room_id}")
 async def get_room_info(room_id: str):
     """Get information about a specific room"""
-    room_info = manager.get_room_info(room_id)
-    if room_info:
-        return room_info
-    else:
-        return {
-            "room_id": room_id,
-            "exists": False,
-            "participant_count": 0,
-            "participants": []
-        }
+    connections = manager.active_connections.get(room_id, set())
+    participants = []
+    
+    for conn in connections:
+        if conn in manager.user_info:
+            user = manager.user_info[conn]
+            participants.append({
+                "id": user["id"], 
+                "name": user["name"],
+                "joined_at": user.get("joined_at")
+            })
+    
+    return {
+        "room_id": room_id,
+        "exists": room_id in manager.active_connections,
+        "participant_count": len(connections),
+        "participants": participants,
+        "platform": "vercel"
+    }
 
 @app.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, name: str = "Anonymous"):
-    """WebSocket endpoint for video calling"""
+    """WebSocket endpoint for video calling - Vercel compatible"""
     
-    # Create user data
     user_data = {
         "id": str(uuid.uuid4()),
         "name": name,
-        "joined_at": datetime.now().isoformat()
+        "joined_at": datetime.now().isoformat(),
+        "platform": "vercel"
     }
     
-    logger.info(f"🔌 New WebSocket connection: {name} -> room {room_id}")
+    logger.info(f"🔌 New WebSocket connection on Vercel: {name} -> room {room_id}")
     
     try:
-        # Connect user to room
         await manager.connect(websocket, room_id, user_data)
         
-        # Handle messages
         while True:
             try:
                 # Receive message from client
@@ -258,98 +275,118 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, name: str = "An
                 # Handle different message types
                 if message_type in ["offer", "answer", "ice-candidate"]:
                     await handle_webrtc_message(websocket, room_id, message)
-                
                 elif message_type == "media-state":
                     await handle_media_state(websocket, room_id, message)
-                
                 elif message_type == "chat":
                     await handle_chat_message(websocket, room_id, message)
-                
+                elif message_type == "ping":
+                    # Handle ping for connection keep-alive
+                    await manager.send_to_user(websocket, {"type": "pong"})
                 else:
                     logger.warning(f"❓ Unknown message type: {message_type}")
                     
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Invalid JSON received: {e}")
+                await manager.send_to_user(websocket, {
+                    "type": "error",
+                    "message": "Invalid JSON format"
+                })
             except Exception as e:
                 logger.error(f"❌ Error processing message: {e}")
                 break
     
     except WebSocketDisconnect:
-        logger.info(f"🔌 WebSocket disconnected: {name}")
+        logger.info(f"🔌 WebSocket disconnected on Vercel: {name}")
     except Exception as e:
-        logger.error(f"❌ WebSocket error for {name}: {e}")
+        logger.error(f"❌ WebSocket error for {name} on Vercel: {e}")
     finally:
         manager.disconnect(websocket)
 
 async def handle_webrtc_message(websocket: WebSocket, room_id: str, message: dict):
-    """Handle WebRTC signaling messages (offer, answer, ice-candidate)"""
-    sender_info = manager.user_info[websocket]
-    target_user_id = message.get("target")
-    message_type = message["type"]
-    
-    # Add sender information
-    message["sender"] = sender_info["id"]
-    message["sender_name"] = sender_info["name"]
-    
-    if target_user_id:
-        # Send to specific user
-        target_websocket = None
-        for conn in manager.active_connections.get(room_id, []):
-            if conn in manager.user_info and manager.user_info[conn]["id"] == target_user_id:
-                target_websocket = conn
-                break
+    """Handle WebRTC signaling messages"""
+    try:
+        sender_info = manager.user_info[websocket]
+        target_user_id = message.get("target")
+        message_type = message["type"]
         
-        if target_websocket:
-            await manager.send_to_user(target_websocket, message)
-            logger.info(f"📤 Forwarded {message_type} from {sender_info['name']} to {manager.user_info[target_websocket]['name']}")
+        # Add sender information
+        message["sender"] = sender_info["id"]
+        message["sender_name"] = sender_info["name"]
+        message["platform"] = "vercel"
+        
+        if target_user_id:
+            # Send to specific user
+            target_websocket = None
+            for conn in manager.active_connections.get(room_id, []):
+                if conn in manager.user_info and manager.user_info[conn]["id"] == target_user_id:
+                    target_websocket = conn
+                    break
+            
+            if target_websocket:
+                await manager.send_to_user(target_websocket, message)
+                logger.info(f"📤 Forwarded {message_type} from {sender_info['name']} to {manager.user_info[target_websocket]['name']}")
+            else:
+                logger.warning(f"❌ Target user {target_user_id} not found in room {room_id}")
         else:
-            logger.warning(f"❌ Target user {target_user_id} not found in room {room_id}")
-    else:
-        # Broadcast to all users in room (for initial offers)
-        await manager.broadcast_to_room(room_id, message, exclude=websocket)
-        logger.info(f"📡 Broadcasted {message_type} from {sender_info['name']} to room {room_id}")
+            # Broadcast to all users in room
+            await manager.broadcast_to_room(room_id, message, exclude=websocket)
+            logger.info(f"📡 Broadcasted {message_type} from {sender_info['name']} to room {room_id}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error handling WebRTC message: {e}")
 
 async def handle_media_state(websocket: WebSocket, room_id: str, message: dict):
-    """Handle media state changes (mute/unmute, video on/off)"""
-    sender_info = manager.user_info[websocket]
-    
-    media_message = {
-        "type": "media-state",
-        "user": sender_info,
-        "audio_enabled": message.get("audio_enabled", True),
-        "video_enabled": message.get("video_enabled", True)
-    }
-    
-    await manager.broadcast_to_room(room_id, media_message, exclude=websocket)
-    logger.info(f"🎛️ Media state from {sender_info['name']}: audio={message.get('audio_enabled')}, video={message.get('video_enabled')}")
+    """Handle media state changes"""
+    try:
+        sender_info = manager.user_info[websocket]
+        
+        media_message = {
+            "type": "media-state",
+            "user": sender_info,
+            "audio_enabled": message.get("audio_enabled", True),
+            "video_enabled": message.get("video_enabled", True),
+            "platform": "vercel"
+        }
+        
+        await manager.broadcast_to_room(room_id, media_message, exclude=websocket)
+        logger.info(f"🎛️ Media state from {sender_info['name']}: audio={message.get('audio_enabled')}, video={message.get('video_enabled')}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling media state: {e}")
 
 async def handle_chat_message(websocket: WebSocket, room_id: str, message: dict):
     """Handle chat messages"""
-    sender_info = manager.user_info[websocket]
-    
-    chat_message = {
-        "type": "chat",
-        "user": sender_info,
-        "message": message["message"],
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    await manager.broadcast_to_room(room_id, chat_message)
-    logger.info(f"💬 Chat from {sender_info['name']}: {message['message']}")
+    try:
+        sender_info = manager.user_info[websocket]
+        
+        chat_message = {
+            "type": "chat",
+            "user": sender_info,
+            "message": message["message"],
+            "timestamp": datetime.now().isoformat(),
+            "platform": "vercel"
+        }
+        
+        await manager.broadcast_to_room(room_id, chat_message)
+        logger.info(f"💬 Chat from {sender_info['name']}: {message['message']}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling chat message: {e}")
 
+# Vercel serverless function compatibility
 if __name__ == "__main__":
     import uvicorn
     
     print("=" * 60)
-    print("🚀 STARTING VIDEOCALL SIGNALING SERVER")
+    print("🚀 STARTING VIDEOCALL SIGNALING SERVER FOR VERCEL")
     print("=" * 60)
     print("📡 Server URL: http://localhost:8000")
     print("🔌 WebSocket: ws://localhost:8000/ws/{room_id}?name={user_name}")
     print("📊 Health Check: http://localhost:8000/health")
     print("🏠 Room List: http://localhost:8000/rooms")
     print("=" * 60)
-    print("✅ Server is ready for connections!")
-    print("💡 Open your React app at http://localhost:3000")
+    print("✅ Server is ready for Vercel deployment!")
+    print("🌐 Deploy URL: video-call-1-0-0.vercel.app")
     print("=" * 60)
     
     uvicorn.run(

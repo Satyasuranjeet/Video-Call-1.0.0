@@ -23,14 +23,25 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
   const myUserIdRef = useRef(null)
   const reconnectTimeoutRef = useRef(null)
 
-  // WebRTC configuration
+  // WebRTC configuration with STUN servers
   const rtcConfiguration = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
     ],
     iceCandidatePoolSize: 10,
+  }
+
+  // Get the correct WebSocket URL for Vercel deployment
+  const getWebSocketUrl = () => {
+    // Always use the Vercel backend
+    const backendUrl = "video-call-1-0-0.vercel.app"
+    const protocol = "wss:" // Vercel always uses HTTPS/WSS
+
+    return `${protocol}//${backendUrl}/ws/${roomId}?name=${encodeURIComponent(userName)}`
   }
 
   // Initialize everything when component mounts
@@ -124,9 +135,8 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
   const connectToSignalingServer = async () => {
     return new Promise((resolve, reject) => {
       try {
-        // Make sure we're connecting to the right server
-        const serverUrl = `https://video-call-1-0-0.vercel.app/ws/${roomId}?name=${encodeURIComponent(userName)}`
-        console.log("🔌 Connecting to:", serverUrl)
+        const serverUrl = getWebSocketUrl()
+        console.log("🔌 Connecting to Vercel backend:", serverUrl)
 
         const ws = new WebSocket(serverUrl)
         wsRef.current = ws
@@ -135,15 +145,15 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
         const timeout = setTimeout(() => {
           if (ws.readyState !== WebSocket.OPEN) {
             ws.close()
-            reject(new Error("Connection timeout - is the server running?"))
+            reject(new Error("Connection timeout - Vercel backend may be sleeping"))
           }
-        }, 10000)
+        }, 20000) // Longer timeout for Vercel cold starts
 
         ws.onopen = () => {
-          console.log("✅ Connected to signaling server")
+          console.log("✅ Connected to Vercel signaling server")
           clearTimeout(timeout)
           setIsConnected(true)
-          setConnectionStatus("Connected")
+          setConnectionStatus("Connected to Vercel")
           resolve()
         }
 
@@ -160,17 +170,21 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
         ws.onclose = (event) => {
           console.log("❌ WebSocket closed:", event.code, event.reason)
           setIsConnected(false)
-          setConnectionStatus("Disconnected")
+          setConnectionStatus("Disconnected from Vercel")
 
           // Try to reconnect if it wasn't intentional
           if (event.code !== 1000 && !reconnectTimeoutRef.current) {
-            console.log("🔄 Attempting to reconnect...")
+            console.log("🔄 Attempting to reconnect to Vercel...")
+            setConnectionStatus("Reconnecting to Vercel...")
             reconnectTimeoutRef.current = setTimeout(() => {
               reconnectTimeoutRef.current = null
               if (wsRef.current?.readyState !== WebSocket.OPEN) {
-                connectToSignalingServer().catch(console.error)
+                connectToSignalingServer().catch((error) => {
+                  console.error("❌ Reconnection failed:", error)
+                  setError("Connection lost to Vercel backend. Please refresh the page.")
+                })
               }
-            }, 3000)
+            }, 5000) // Longer delay for Vercel
           }
         }
 
@@ -178,7 +192,15 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
           console.error("❌ WebSocket error:", error)
           clearTimeout(timeout)
           setConnectionStatus("Connection failed")
-          reject(new Error("Failed to connect to server - is it running on port 8000?"))
+
+          let errorMessage = "Failed to connect to Vercel backend"
+          if (navigator.onLine === false) {
+            errorMessage = "No internet connection. Please check your network."
+          } else {
+            errorMessage = "Cannot connect to Vercel backend. The server may be starting up (cold start)."
+          }
+
+          reject(new Error(errorMessage))
         }
       } catch (error) {
         console.error("❌ Error creating WebSocket:", error)
@@ -593,7 +615,7 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-lg p-6">
           <div className="bg-red-600 rounded-full p-4 w-16 h-16 mx-auto mb-4">
             <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -605,7 +627,7 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
             </svg>
           </div>
           <h2 className="text-xl font-bold mb-2">Connection Error</h2>
-          <p className="text-gray-300 mb-4">{error}</p>
+          <p className="text-gray-300 mb-4 whitespace-pre-line">{error}</p>
           <div className="space-y-2">
             <button onClick={initializeApp} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded mr-2">
               Try Again
@@ -614,9 +636,17 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
               Go Back
             </button>
           </div>
-          <div className="mt-4 text-sm text-gray-400">
-            <p>Make sure the server is running:</p>
-            <code className="bg-gray-800 px-2 py-1 rounded">python scripts/signaling_server.py</code>
+
+          {/* Helpful instructions */}
+          <div className="mt-6 text-sm text-gray-400 bg-gray-800 p-4 rounded">
+            <h3 className="font-bold mb-2">Troubleshooting:</h3>
+            <div className="text-left space-y-1">
+              <p>• Backend is hosted on Vercel: video-call-1-0-0.vercel.app</p>
+              <p>• Check if the Vercel deployment is active</p>
+              <p>• Vercel functions may have cold start delays</p>
+              <p>• Check browser console for detailed error messages</p>
+              <p>• Ensure camera/microphone permissions are granted</p>
+            </div>
           </div>
         </div>
       </div>
@@ -709,19 +739,30 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
         </div>
       </main>
 
+      {/* Vercel Status */}
+      <div className="fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg">
+        <div className="flex items-center space-x-2">
+          <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-400" : "bg-red-400"}`}></div>
+          <div>
+            <p className="font-bold text-sm">Vercel Backend</p>
+            <p className="text-xs">video-call-1-0-0.vercel.app</p>
+          </div>
+        </div>
+      </div>
+
       {/* Debug Info */}
       <div className="fixed bottom-4 left-4 bg-black bg-opacity-75 text-white p-3 rounded text-xs max-w-xs">
         <div className="font-bold mb-1">Debug Info:</div>
+        <div>Backend: video-call-1-0-0.vercel.app</div>
+        <div>WebSocket: wss://</div>
         <div>Server: {isConnected ? "✅ Connected" : "❌ Disconnected"}</div>
         <div>Local Stream: {localStream ? "✅ Active" : "❌ None"}</div>
         <div>Participants: {participants.length}</div>
         <div>Remote Streams: {remoteStreams.size}</div>
         <div>Peer Connections: {peerConnectionsRef.current.size}</div>
-        <div>Room ID: {roomId}</div>
       </div>
     </div>
   )
 }
 
 export default VideoRoom
-  
