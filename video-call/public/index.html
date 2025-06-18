@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="VideoCall Pro - Connect face-to-face anywhere, anytime with crystal clear video calls"
+    />
+    <title>VideoCall Pro - HD Video Calling</title>
+    
+    <!-- Preload critical resources -->
+    <link rel="preconnect" href="ws://localhost:8000">
+    
+    <!-- Security headers -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    
+    <!-- PWA support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  </head>
+  <body>
+    <noscript>
+      <div style="text-align: center; padding: 50px; font-family: Arial, sans-serif;">
+        <h1>JavaScript Required</h1>
+        <p>You need to enable JavaScript to use VideoCall Pro.</p>
+        <p>Please enable JavaScript in your browser settings and refresh the page.</p>
+      </div>
+    </noscript>
+    <div id="root"></div>
+    
+    <!-- Development helper -->
+    <script>
+      // Log WebRTC support
+      if (typeof RTCPeerConnection !== 'undefined') {
+        console.log('✅ WebRTC supported');
+      } else {
+        console.error('❌ WebRTC not supported');
+        alert('Your browser does not support WebRTC. Please use a modern browser like Chrome, Firefox, or Safari.');
+      }
+      
+      // Log media devices support
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        console.log('✅ Media devices supported');
+      } else {
+        console.error('❌ Media devices not supported');
+      }
+    </script>
+  </body>
+</html>
