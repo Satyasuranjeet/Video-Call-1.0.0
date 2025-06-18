@@ -125,7 +125,7 @@ const VideoRoom = ({ roomId, userName, onLeaveRoom }) => {
     return new Promise((resolve, reject) => {
       try {
         // Make sure we're connecting to the right server
-        const serverUrl = `ws://localhost:8000/ws/${roomId}?name=${encodeURIComponent(userName)}`
+        const serverUrl = `ws:video-call-1-0-0.vercel.app/ws/${roomId}?name=${encodeURIComponent(userName)}`
         console.log("🔌 Connecting to:", serverUrl)
 
         const ws = new WebSocket(serverUrl)
