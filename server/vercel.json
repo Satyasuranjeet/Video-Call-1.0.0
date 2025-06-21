@@ -2,30 +2,30 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/index.py",
-      "use": "@vercel/python"
+      "src": "app.py",
+      "use": "@vercel/python",
+      "config": { 
+        "maxLambdaSize": "15mb",
+        "runtime": "python3.9"
+      }
     }
   ],
   "routes": [
     {
-      "src": "/ws/(.*)",
-      "dest": "/api/index.py"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/api/index.py"
+      "dest": "app.py"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/ws/(.*)",
+      "destination": "app.py"
     }
   ],
   "functions": {
-    "api/index.py": {
-      "maxDuration": 30
+    "app.py": {
+      "memory": 1024,
+      "maxDuration": 60
     }
-  },
-  "env": {
-    "PYTHONPATH": "."
   }
 }
